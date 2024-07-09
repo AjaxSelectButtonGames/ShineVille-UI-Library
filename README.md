@@ -9,7 +9,7 @@ To use the ShineVille UI Library, include the necessary headers and link against
 ## Usage
 ### Creating a Widget
 ```cpp
-#include "shineville_ui.h"
+#include "sv_ui2.0.h"
 
 int main(int argc, char* argv[]) {
     // Initialize SDL, create a window, etc.
