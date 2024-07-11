@@ -48,6 +48,7 @@ bool initSDL(SDL_Window*& window, SDL_GLContext& context) {
 
     glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
     glEnable(GL_BLEND);
+   
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     return true;
@@ -119,7 +120,7 @@ int main(int argc, char* argv[]) {
     // Initialize the UI library
     SV_UI::initOpenGL();
     SV_UI::setProjectionMatrix(SCREEN_WIDTH, SCREEN_HEIGHT);
-
+    SV_UI::initOpenGLDebug();
     // Load texture
     GLuint texture = loadTexture("metalPanel_green.png");
     if (!texture) {
@@ -131,10 +132,20 @@ int main(int argc, char* argv[]) {
         std::cout << "Button Clicked!" << std::endl;
         };
 
+    auto dropClick = []() {
+        std::string dropDownItems[] = { "Item 1", "Item 2", "Item 3" };
+        };
     // Create some widgets
     SV_UI::createWidget(1, 0, 0, 400, 400, SV_UI::WidgetOptions::WIDGET_DRAGGABLE, "metalPanel_green.png");
     SV_UI::Text("Hello World",2.0f);
-    SV_UI::Button("Click me", 2.0f,"", buttonClickCallback);
+   // SV_UI::Button("Click me", 1.0f, "", buttonClickCallback, 75, 30, SV_UI::Alignment::BottomCenter);
+    
+    std::vector<std::string> items = { "Option 1", "Option 2", "Option 3" };
+    auto onItemSelected = [](const std::string& selectedItem) {
+        std::cout << "Selected item: " << selectedItem << std::endl;
+        };
+
+    SV_UI::ListBox(items, onItemSelected,250,100);
     
     SV_UI::endWidget();
     SV_UI::createWidget(2, 400, 100, 200, 150, SV_UI::WidgetOptions::WIDGET_DRAGGABLE, "metalPane3l_green.png");

@@ -17,8 +17,11 @@
 #define GLT_IMPLEMENTATION
 #include "gltext.h"
 #include "sv_ui_styles.h"
+#include "sv_ui_utilities.h"
 
 namespace SV_UI {
+   
+    
     GLuint shaderProgram;
     GLuint VAO, VBO, EBO;
     glm::mat4 projection; // Declaration without initialization
@@ -26,17 +29,7 @@ namespace SV_UI {
     void setProjectionMatrix(int screenWidth, int screenHeight) {
         projection = glm::ortho(0.0f, static_cast<float>(screenWidth), static_cast<float>(screenHeight), 0.0f, -1.0f, 1.0f);
     }
-    enum class Alignment {
-        TopLeft,
-        TopCenter,
-        TopRight,
-        CenterLeft,
-        Center,
-        CenterRight,
-        BottomLeft,
-        BottomCenter,
-        BottomRight
-    };
+   
 
     struct Widget; // Forward declaration
     struct TextRenderer; // Ensure this is forward-declared if its full definition comes later
@@ -273,9 +266,9 @@ namespace SV_UI {
         std::string text;
         float fontSize;
         GLTtext* gltText;
-
+        
         TextComponent(const std::string& text, float fontSize)
-            : text(text), fontSize(fontSize) {
+            : text(text), fontSize(fontSize){
             gltText = gltCreateText();
             if (gltText == nullptr) {
                throw std::runtime_error("Failed to create text");
@@ -289,6 +282,7 @@ namespace SV_UI {
             gltSetText(gltText, text.c_str());
             gltBeginDraw();
 
+           
             // Determine text position within widget for centered alignment
             float textX = x + width / 2.0f; // Centered horizontally
             float textY = y + height / 2.0f; // Centered vertically
@@ -303,6 +297,10 @@ namespace SV_UI {
             // Handle events for text component if needed
         }
 
+        void setText(const std::string& newText) {
+            text = newText;
+            gltSetText(gltText, text.c_str()); // Update the GLText instance
+        }
         ~TextComponent() {
             gltDeleteText(gltText);
             gltTerminate();
@@ -318,9 +316,14 @@ namespace SV_UI {
         GLuint texture = 0;
         std::function<void()> onClick;
         bool hasTexture = false; // New flag to indicate if the button has a texture
+        int width;
+        int height;
+        Alignment alignment;
+        ButtonComponent(const std::string text, float fontSize, const std::string& texturePath = "", std::function<void()> onClick = nullptr, int width = 100, int height = 50,Alignment alignment = Alignment::BottomCenter)
+            : onClick(onClick), alignment(alignment) {
+            this->width = width; // Set button width
+            this->height = height; // Set button height
 
-        ButtonComponent(const std::string text, float fontSize, const std::string& texturePath = "", std::function<void()> onClick = nullptr)
-            : onClick(onClick) {
             if (!text.empty()) {
                 textComponent = new TextComponent(text, fontSize);
             }
@@ -357,7 +360,7 @@ namespace SV_UI {
                 glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 1);
 
                 glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(x, y, 0.0f));
-                model = glm::scale(model, glm::vec3(width, height, 1.0f));
+                model = glm::scale(model, glm::vec3(width, height, 1.0f)); // Use button's width and height
                 GLuint modelLoc = glGetUniformLocation(shaderProgram, "model");
                 glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
 
@@ -367,6 +370,7 @@ namespace SV_UI {
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
                 glBindVertexArray(0);
                 glUseProgram(0);
+                calculatePositionForAlignment(x, y, width, height, parent->width, parent->height, alignment);
             }
             else {
                 // Draw a basic colored square
@@ -386,6 +390,7 @@ namespace SV_UI {
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
                 glBindVertexArray(0);
                 glUseProgram(0);
+                calculatePositionForAlignment(x, y, width, height, parent->width, parent->height, alignment);
             }
 
             //draw text component if it exists
@@ -407,6 +412,18 @@ namespace SV_UI {
             }
         }
 
+
+        //Override the updatepos method
+        virtual void updatePosition(float deltaX, float deltaY) override {
+            // First, call the base class method to update the button's position
+            UIComponent::updatePosition(deltaX, deltaY);
+
+            // Then, update the position of the text component relative to the new button position
+            if (textComponent) {
+                textComponent->x = this->x;
+                textComponent->y = this->y;
+            }
+        }
         ~ButtonComponent() {
             delete textComponent; // Clean up the text component
             if (texture) {
@@ -416,19 +433,148 @@ namespace SV_UI {
 
 
     };
+    ///////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////LIST BOX COMPONENT//////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////////
    
+    struct ListBoxComponent : public UIComponent {
+        std::vector<std::string> items; // List of items to display
+        std::function<void(const std::string&)> onItemSelected; // Callback function for item selection
+        TextComponent* textComponent = nullptr;
+        int selectedItemIndex = -1; // Index of the currently selected item, -1 if none
+        int hoveredItemIndex = -1; // Index of the item under the mouse cursor
+        
+
+        // Modified constructor to include width and height parameters
+        ListBoxComponent(const std::vector<std::string>& items, std::function<void(const std::string&)> onItemSelected = nullptr, int width = 100, int height = 150)
+            : items(items), onItemSelected(onItemSelected) {
+            this->width = width;
+            this->height = height;
+            // Instantiate textComponent here, assuming a default font size (adjust as needed)
+            textComponent = new TextComponent("", 2.0f); // Empty text initially
+        }
+
+        virtual void Draw() override {
+            if (!shaderProgram || !VAO) {
+                std::cerr << "Shader program or VAO not initialized." << std::endl;
+                return;
+            }
+
+            if (!textComponent) { // Check if textComponent is nullptr
+                std::cerr << "Text component not initialized." << std::endl;
+                return; // Skip drawing if textComponent is not initialized
+            }
+
+            glUseProgram(shaderProgram);
+            glBindVertexArray(VAO);
+
+            // Draw the border around the list box
+            GLint useTextureLoc = glGetUniformLocation(shaderProgram, "useTexture");
+            GLint fallbackColorLoc = glGetUniformLocation(shaderProgram, "fallbackColor");
+            GLint modelLoc = glGetUniformLocation(shaderProgram, "model");
+            GLint projLoc = glGetUniformLocation(shaderProgram, "projection");
+
+            if (useTextureLoc == -1 || fallbackColorLoc == -1 || modelLoc == -1 || projLoc == -1) {
+                std::cerr << "Failed to get uniform locations." << std::endl;
+                return;
+            }
+
+            glUniform1i(useTextureLoc, 0); // Not using texture
+            glUniform4f(fallbackColorLoc, 0.0f, 0.0f, 0.0f, 1.0f); // Black border color
+
+            glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(x - 2.0f, y - 2.0f, 0.0f));
+            model = glm::scale(model, glm::vec3(width + 4.0f, height + 4.0f, 1.0f));
+            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+            glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
+
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+            // Draw the list box background
+            model = glm::translate(glm::mat4(1.0f), glm::vec3(x, y, 0.0f));
+            model = glm::scale(model, glm::vec3(width, height, 1.0f));
+            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+            glUniform4f(fallbackColorLoc, 0.8f, 0.8f, 0.8f, 1.0f); // Light grey background
+
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+            // Draw the items inside the list box
+            float itemHeight = 20.0f; // Example item height
+            float currentY = y + 5.0f; // Start drawing items a bit inside the box
+            for (size_t i = 0; i < items.size(); ++i) {
+                // Highlight the hovered item
+                if (i == hoveredItemIndex) {
+                    glm::mat4 highlightModel = glm::translate(glm::mat4(1.0f), glm::vec3(x, currentY, 0.0f));
+                    highlightModel = glm::scale(highlightModel, glm::vec3(width, itemHeight, 1.0f));
+                    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(highlightModel));
+                    glUniform4f(fallbackColorLoc, 0.5f, 0.5f, 0.5f, 1.0f); // Highlight color, e.g., a shade of grey
+                    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+                }
+
+                // Update textComponent's text to the current item
+                textComponent->setText(items[i]);
+                // Adjust textComponent's position
+                textComponent->x = x + 5; // Start a bit inside from the left
+                textComponent->y = currentY + (itemHeight / 2.0f) - (textComponent->fontSize / 2.0f);
+                // Draw the textComponent
+                textComponent->Draw();
+
+                currentY += itemHeight; // Move to the next item position
+            }
+
+            glBindVertexArray(0);
+            glUseProgram(0);
+        }
+
+
+        virtual void handleEvents(SDL_Event* event) override {
+            // Handle item selection, e.g., on mouse click
+            if (event->type == SDL_MOUSEBUTTONDOWN && event->button.button == SDL_BUTTON_LEFT) {
+                int mouseX = event->button.x;
+                int mouseY = event->button.y;
+                // Check if the click is within the list box bounds
+                if (mouseX > x && mouseX < x + width && mouseY > y && mouseY < y + height) {
+                    // Calculate which item was clicked
+                    int clickedItemIndex = (mouseY - y) / 20; // Assuming 20px per item for simplicity
+                    if (clickedItemIndex >= 0 && clickedItemIndex < items.size()) {
+                        selectedItemIndex = clickedItemIndex;
+                        if (onItemSelected) {
+                            onItemSelected(items[clickedItemIndex]); // Call the callback function with the selected item
+                        }
+                    }
+                }
+            }
+
+            // Handle mouse motion for hover effect
+            if (event->type == SDL_MOUSEMOTION) {
+                int mouseX = event->motion.x;
+                int mouseY = event->motion.y;
+                // Check if the mouse is within the list box bounds
+                if (mouseX > x && mouseX < x + width && mouseY > y && mouseY < y + height) {
+                    hoveredItemIndex = (mouseY - y) / 20; // Assuming 20px per item for simplicity
+                    if (hoveredItemIndex < 0 || hoveredItemIndex >= items.size()) {
+                        hoveredItemIndex = -1;
+                    }
+                }
+                else {
+                    hoveredItemIndex = -1;
+                }
+            }
+        }
+    };
+
+
+
     // Functions for Widget
     void drawWidget(const Widget& widget) {
         glUseProgram(shaderProgram);
 
+        // Set up transformation and projection matrices
         glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(widget.x, widget.y, 0.0f));
         model = glm::scale(model, glm::vec3(widget.width, widget.height, 1.0f));
-        GLuint modelLoc = glGetUniformLocation(shaderProgram, "model");
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(model));
+        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
-        GLuint projLoc = glGetUniformLocation(shaderProgram, "projection");
-        glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
-
+        // Bind texture if available
         int useTextureUniform = glGetUniformLocation(shaderProgram, "useTexture");
         if (widget.texture) {
             glActiveTexture(GL_TEXTURE0);
@@ -438,19 +584,28 @@ namespace SV_UI {
         }
         else {
             glUniform1i(useTextureUniform, 0);
-            glUniform4f(glGetUniformLocation(shaderProgram, "fallbackColor"), 1.0f, 0.0f, 0.0f, 1.0f); // Example: Red color
+            glUniform4f(glGetUniformLocation(shaderProgram, "fallbackColor"), 1.0f, 0.0f, 0.0f, 1.0f);
         }
 
+        // Draw the widget's base rectangle
         glBindVertexArray(VAO);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
-        for (const auto component : widget.components) {
-            component->Draw();
-        }
+      //draw each component after the widget
+        for (auto component : widget.components) {
+			component->Draw();
+		}
+
+        //if it has text make sure we draw that as well
+        if (widget.textComponent) {
+			widget.textComponent->Draw();
+		}
 
         glBindVertexArray(0);
         glUseProgram(0);
     }
+
+    
 
 
 
@@ -518,7 +673,7 @@ namespace SV_UI {
                 return;
             }
         }
-        std::cerr << "Widget with ID " << id << " not found" << std::endl;
+       
     }
 
     void Text(const std::string& text, float fontSize) {
@@ -535,18 +690,33 @@ namespace SV_UI {
 		uiManager.currentWidget->components.push_back(textComponent);
 	}
 
-    void Button(const std::string& text, float fontSize, const std::string& texturePath, std::function<void()> onClick) {
+    void Button(const std::string& text, float fontSize, const std::string& texturePath, std::function<void()> onClick, int buttonWidth = 100, int buttonHeight = 50, Alignment alignment = Alignment::BottomCenter) {
+        if (!uiManager.currentWidget) {
+            std::cerr << "No widget selected" << std::endl;
+            return;
+        }
+        auto buttonComponent = new ButtonComponent(text, fontSize, texturePath, onClick, buttonWidth, buttonHeight);
+        buttonComponent->y = static_cast<float>(uiManager.currentWidget->y);
+        buttonComponent->x = static_cast<float>(uiManager.currentWidget->x);
+        // Set buttonComponent's width and height to the specified values or defaults
+        buttonComponent->width = buttonWidth;
+        buttonComponent->height = buttonHeight;
+        buttonComponent->parent = uiManager.currentWidget;
+        uiManager.currentWidget->components.push_back(buttonComponent);
+    }
+
+   void ListBox(const std::vector<std::string>& items, std::function<void(const std::string&)> onItemSelected,int ListBoxwidth = 100, int ListBoxheight = 100) {
 		if (!uiManager.currentWidget) {
 			std::cerr << "No widget selected" << std::endl;
 			return;
 		}
-		auto buttonComponent = new ButtonComponent(text, fontSize, texturePath, onClick);
-		buttonComponent->y = static_cast<float>(uiManager.currentWidget->y);
-		buttonComponent->x = static_cast<float>(uiManager.currentWidget->x);
-		buttonComponent->width = uiManager.currentWidget->width;
-		buttonComponent->height = uiManager.currentWidget->height;
-		buttonComponent->parent = uiManager.currentWidget;
-		uiManager.currentWidget->components.push_back(buttonComponent);
+		auto listBoxComponent = new ListBoxComponent(items, onItemSelected, ListBoxwidth,ListBoxheight);
+		listBoxComponent->y = static_cast<float>(uiManager.currentWidget->y);
+		listBoxComponent->x = static_cast<float>(uiManager.currentWidget->x);
+        listBoxComponent->width = ListBoxwidth;
+		listBoxComponent->height = ListBoxheight;
+		listBoxComponent->parent = uiManager.currentWidget;
+		uiManager.currentWidget->components.push_back(listBoxComponent);
 	}
     void endWidget() {
         uiManager.currentWidget = nullptr;
@@ -554,8 +724,15 @@ namespace SV_UI {
     }
 
     void renderUI() {
-        for (const auto widget : uiManager.widgets) {
-            drawWidget(*widget);
+        for (auto& widget : uiManager.widgets) {
+            drawWidget(*widget); // Draw the widget itself
+
+            // Now draw the components of the widget
+            for (auto& component : widget->components) {
+                component->Draw(); // This includes TextComponent, ButtonComponent, and dropDownComponent
+
+               
+            }
         }
     }
 
